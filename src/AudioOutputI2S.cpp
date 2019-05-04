@@ -21,6 +21,11 @@
 #include <Arduino.h>
 #ifdef ESP32
   #include "driver/i2s.h"
+#elif defined K210
+  #include "dmac.h"
+  #include "fpioa.h"
+  #include "i2s.h"
+  #include "plic.h"
 #else
   #include <i2s.h>
 #endif
@@ -81,6 +86,11 @@ AudioOutputI2S::AudioOutputI2S(int port, int output_mode, int dma_buf_count, int
     }
     i2s_zero_dma_buffer((i2s_port_t)portNo);
   } 
+#elif defined K210
+  i2s_init((i2s_device_number_t)portNo, I2S_TRANSMITTER, 0x3);
+  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_0, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_1, RIGHT_JUSTIFYING_MODE);
+  
+  SetPinout(35, 33, 34);
 #else
   (void) dma_buf_count;
   (void) use_apll;
@@ -122,6 +132,10 @@ bool AudioOutputI2S::SetPinout(int bclk, int wclk, int dout)
   };
   i2s_set_pin((i2s_port_t)portNo, &pins);
   return true;
+#if defined K210
+  fpioa_set_function(dout, FUNC_I2S0_OUT_D0 + (portNo * 11)); //34
+  fpioa_set_function(bclk, FUNC_I2S0_SCLK + (portNo * 11)); //35
+  fpioa_set_function(wclk, FUNC_I2S0_WS + (portNo * 11)); //33
 #else
   (void) bclk;
   (void) wclk;
@@ -136,6 +150,8 @@ bool AudioOutputI2S::SetRate(int hz)
   this->hertz = hz;
 #ifdef ESP32
   i2s_set_sample_rates((i2s_port_t)portNo, AdjustI2SRate(hz)); 
+#elif defined K210
+  i2s_set_sample_rate((i2s_device_number_t)portNo, AdjustI2SRate(hz));
 #else
   i2s_set_rate(AdjustI2SRate(hz));
 #endif
@@ -190,6 +206,8 @@ bool AudioOutputI2S::ConsumeSample(int16_t sample[2])
     s32 = ((Amplify(ms[RIGHTCHANNEL]))<<16) | (Amplify(ms[LEFTCHANNEL]) & 0xffff);
   }
   return i2s_write_bytes((i2s_port_t)portNo, (const char*)&s32, sizeof(uint32_t), 0);
+#elif defined K210
+  return i2s_send_data((i2s_device_number_t)portNo, I2S_CHANNEL_0, (const uint8_t *)ms, sizeof(int16_t) * 2, 16);
 #else
   uint32_t s32 = ((Amplify(ms[RIGHTCHANNEL]))<<16) | (Amplify(ms[LEFTCHANNEL]) & 0xffff);
   return i2s_write_sample_nb(s32); // If we can't store it, return false.  OTW true
