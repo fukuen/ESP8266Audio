@@ -928,9 +928,12 @@ mad_fixed_t III_requantize(unsigned int value, signed int exp)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
   *(uint32_t*)&power = *(uint32_t*)&rq_table[value]; //memcpy_P(&power, &rq_table[value], sizeof(power)); // Avoid byte access to PROGMEM
-#pragma GCC diagnostic pop
+//#pragma GCC diagnostic pop
+#pragma GCC diagnostic ignored "-Wuninitialized"
   requantized = power.mantissa;
+#pragma GCC diagnostic ignored "-Wuninitialized"
   exp += power.exponent;
+#pragma GCC diagnostic pop
 
   if (exp < 0) {
     if (-exp >= (int)(sizeof(mad_fixed_t) * CHAR_BIT)) {

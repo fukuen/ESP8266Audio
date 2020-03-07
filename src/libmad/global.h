@@ -25,7 +25,7 @@
 /* conditional debugging */
 
 # if defined(DEBUG) && defined(NDEBUG)
-#  error "cannot define both DEBUG and NDEBUG"
+//#  error "cannot define both DEBUG and NDEBUG"
 # endif
 
 # if defined(DEBUG)

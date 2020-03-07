@@ -96,7 +96,7 @@ enum mad_flow AudioGeneratorMP3::ErrorToFlow()
   if ((lastReadPos==0) && (stream->error==MAD_ERROR_LOSTSYNC)) return MAD_FLOW_CONTINUE;
 
   strcpy_P(err, mad_stream_errorstr(stream));
-  snprintf_P(errLine, sizeof(errLine), PSTR("Decoding error '%s' at byte offset %d"),
+  snprintf_P(errLine, sizeof(errLine), PSTR("Decoding error '%s' at byte offset %ld"),
            err, (stream->this_frame - buff) + lastReadPos);
   yield(); // Something bad happened anyway, ensure WiFi gets some time, too
   cb.st(stream->error, errLine);
@@ -200,12 +200,27 @@ retry:
       nsCount = 0;
     }
 
+#ifdef K210
+    int16_t samples[64];
+    for (int i = 0; i < 32; i++) {
+      if (!GetOneSample(lastSample)) {
+        Serial.printf_P(PSTR("G1S failed\n"));
+        running = false;
+        goto done;
+      }
+      samples[i*2] = lastSample[0];
+      samples[i*2 + 1] = lastSample[1];
+    }
+    output->ConsumeSamples(samples, 32);
+  } while (running);
+#else
     if (!GetOneSample(lastSample)) {
       Serial.printf_P(PSTR("G1S failed\n"));
       running = false;
       goto done;
     }
   } while (running && output->ConsumeSample(lastSample));
+#endif
 
 done:
   file->loop();

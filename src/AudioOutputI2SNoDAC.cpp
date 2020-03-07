@@ -93,6 +93,13 @@ bool AudioOutputI2SNoDAC::ConsumeSample(int16_t sample[2])
 #ifdef ESP32
   if (!i2s_write_bytes((i2s_port_t)portNo, (const char *)dsBuff, sizeof(uint32_t) * (oversample/32), 0))
     return false;
+#elif defined K210
+//  i2s_init((i2s_device_number_t)portNo, I2S_TRANSMITTER, 0x3);
+//  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_0, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_1, RIGHT_JUSTIFYING_MODE);
+//  i2s_play((i2s_device_number_t)portNo, DMAC_CHANNEL0, (uint8_t *)ms, sizeof(ms), 512, this->bps, this->channels);
+  i2s_init((i2s_device_number_t)portNo, I2S_TRANSMITTER, 0xC);
+  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_1, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_4, RIGHT_JUSTIFYING_MODE);
+  i2s_play((i2s_device_number_t)portNo, DMAC_CHANNEL0, (uint8_t *)ms, sizeof(ms), 512, this->bps, this->channels);
 #else 
   if (!i2s_write_sample_nb(dsBuff[0])) return false; // No room at the inn
   // At this point we've sent in first of possibly 8 32-bits, need to send

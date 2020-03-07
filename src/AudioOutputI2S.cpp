@@ -26,6 +26,10 @@
   #include "fpioa.h"
   #include "i2s.h"
   #include "plic.h"
+  extern "C" {
+  int i2s_send_data(i2s_device_number_t device_num, i2s_channel_num_t channel_num, const uint8_t *pcm, size_t buf_len,
+                  size_t single_length);
+  }
 #else
   #include <i2s.h>
 #endif
@@ -87,10 +91,13 @@ AudioOutputI2S::AudioOutputI2S(int port, int output_mode, int dma_buf_count, int
     i2s_zero_dma_buffer((i2s_port_t)portNo);
   } 
 #elif defined K210
-  i2s_init((i2s_device_number_t)portNo, I2S_TRANSMITTER, 0x3);
-  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_0, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_1, RIGHT_JUSTIFYING_MODE);
-  
-  SetPinout(35, 33, 34);
+  i2s_init((i2s_device_number_t)portNo, I2S_TRANSMITTER, 0xC);
+  i2s_set_sample_rate((i2s_device_number_t)portNo, 44100);
+//  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_0, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_1, RIGHT_JUSTIFYING_MODE);
+  i2s_tx_channel_config((i2s_device_number_t)portNo, I2S_CHANNEL_1, RESOLUTION_16_BIT, SCLK_CYCLES_32, TRIGGER_LEVEL_4, RIGHT_JUSTIFYING_MODE);
+
+  //SetPinout(35, 33, 34);
+//  SetPinout(I2S_BCK, I2S_WS, I2S_DA);
 #else
   (void) dma_buf_count;
   (void) use_apll;
@@ -113,6 +120,8 @@ AudioOutputI2S::~AudioOutputI2S()
     Serial.printf("UNINSTALL I2S\n");
     i2s_driver_uninstall((i2s_port_t)portNo); //stop & destroy i2s driver
   }
+#elif defined K210
+  //
 #else
   if (i2sOn) i2s_end();
 #endif
@@ -132,10 +141,13 @@ bool AudioOutputI2S::SetPinout(int bclk, int wclk, int dout)
   };
   i2s_set_pin((i2s_port_t)portNo, &pins);
   return true;
-#if defined K210
-  fpioa_set_function(dout, FUNC_I2S0_OUT_D0 + (portNo * 11)); //34
-  fpioa_set_function(bclk, FUNC_I2S0_SCLK + (portNo * 11)); //35
-  fpioa_set_function(wclk, FUNC_I2S0_WS + (portNo * 11)); //33
+#elif defined K210
+//  fpioa_set_function(dout, (fpioa_function_t) (FUNC_I2S0_OUT_D0 + (portNo * 11))); //34
+//  fpioa_set_function(bclk, (fpioa_function_t) (FUNC_I2S0_SCLK + (portNo * 11))); //35
+//  fpioa_set_function(wclk, (fpioa_function_t) (FUNC_I2S0_WS + (portNo * 11))); //33
+  fpioa_set_function(dout, (fpioa_function_t) (FUNC_I2S0_OUT_D1)); //34
+  fpioa_set_function(bclk, (fpioa_function_t) (FUNC_I2S0_SCLK)); //35
+  fpioa_set_function(wclk, (fpioa_function_t) (FUNC_I2S0_WS)); //33
 #else
   (void) bclk;
   (void) wclk;
@@ -151,7 +163,8 @@ bool AudioOutputI2S::SetRate(int hz)
 #ifdef ESP32
   i2s_set_sample_rates((i2s_port_t)portNo, AdjustI2SRate(hz)); 
 #elif defined K210
-  i2s_set_sample_rate((i2s_device_number_t)portNo, AdjustI2SRate(hz));
+//TODO
+//  i2s_set_sample_rate((i2s_device_number_t)portNo, AdjustI2SRate(hz));
 #else
   i2s_set_rate(AdjustI2SRate(hz));
 #endif
@@ -207,11 +220,47 @@ bool AudioOutputI2S::ConsumeSample(int16_t sample[2])
   }
   return i2s_write_bytes((i2s_port_t)portNo, (const char*)&s32, sizeof(uint32_t), 0);
 #elif defined K210
-  return i2s_send_data((i2s_device_number_t)portNo, I2S_CHANNEL_0, (const uint8_t *)ms, sizeof(int16_t) * 2, 16);
+//  return i2s_send_data((i2s_device_number_t)portNo, I2S_CHANNEL_0, (const uint8_t *)ms, sizeof(int16_t) * 2, 16);
+  ms[0] = Amplify(ms[LEFTCHANNEL]);
+  ms[1] = Amplify(ms[RIGHTCHANNEL]);
+  dmac_wait_done(DMAC_CHANNEL0);
+  i2s_send_data_dma((i2s_device_number_t)portNo, (const uint8_t *)ms, sizeof(int16_t) * 2, DMAC_CHANNEL0);
+//  i2s_play((i2s_device_number_t)portNo, DMAC_CHANNEL0, (const uint8_t *)ms, sizeof(int16_t) * 2, 2, this->bps, this->channels);
+  return true;
 #else
   uint32_t s32 = ((Amplify(ms[RIGHTCHANNEL]))<<16) | (Amplify(ms[LEFTCHANNEL]) & 0xffff);
   return i2s_write_sample_nb(s32); // If we can't store it, return false.  OTW true
 #endif
+}
+
+uint16_t AudioOutputI2S::ConsumeSamples(int16_t *samples, uint16_t count)
+{
+  int16_t ms[2];
+  int16_t out[64];
+  int16_t validSamples = count;
+  int16_t curSample = 0;
+
+  while (validSamples) {
+    ms[0] = samples[curSample * 2];
+    ms[1] = samples[curSample * 2 + 1];
+    MakeSampleStereo16( ms );
+    if (this->mono) {
+      // Average the two samples and overwrite
+      int32_t ttl = ms[LEFTCHANNEL] + ms[RIGHTCHANNEL];
+      ms[LEFTCHANNEL] = ms[RIGHTCHANNEL] = (ttl>>1) & 0xffff;
+    }
+    out[curSample*2] = ms[0];
+    out[curSample*2 + 1] = ms[1];
+    validSamples--;
+    curSample++;
+  }
+
+#ifdef K210
+  dmac_wait_done(DMAC_CHANNEL0);
+  i2s_play((i2s_device_number_t)portNo,
+          DMAC_CHANNEL0, (uint8_t *)out, sizeof(out), 64, this->bps, this->channels);
+#endif
+  return true;
 }
 
 bool AudioOutputI2S::stop()

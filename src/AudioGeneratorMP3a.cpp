@@ -97,6 +97,9 @@ bool AudioGeneratorMP3a::loop()
   if (!running) goto done; // Nothing to do here!
 
   // If we've got data, try and pump it out...
+#ifdef K210
+  output->ConsumeSamples(outSample, validSamples);
+#else
   while (validSamples) {
     lastSample[0] = outSample[curSample*2];
     lastSample[1] = outSample[curSample*2 + 1];
@@ -104,6 +107,7 @@ bool AudioGeneratorMP3a::loop()
     validSamples--;
     curSample++;
   }
+#endif
 
   // No samples available, need to decode a new frame
   if (FillBufferWithValidFrame()) {

@@ -35,7 +35,8 @@ public:
   virtual int available() override;
   virtual int read() override;
   virtual int peek() override;
-  virtual void flush() override;
+//  virtual void flush() override;
+  virtual void flush();
   virtual size_t write(uint8_t x) override { (void)x; return 0; };
 
 private:
